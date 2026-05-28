@@ -1,1 +1,67 @@
 
+name: Maven CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-test-deploy:
+    runs-on: self-hosted
+
+    steps:
+    # 1. Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # 2. Set up JDK 17
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    # 3. Build with Maven
+    - name: Build with Maven
+      run: mvn clean package -DskipTests
+
+    # 4. Run Tests
+    - name: Run Tests
+      run: mvn test
+
+    # 5. Deploy WAR locally to Tomcat
+    - name: Deploy WAR to Tomcat
+      env:
+        TOMCAT_SERVICE: tomcat10
+        DEPLOY_DIR: /opt/tomcat10/webapps/ROOT
+      run: |
+        set -e
+        BACKUP_DIR="${DEPLOY_DIR}_backup"
+
+        echo ">>> Stopping Tomcat..."
+        sudo -n /bin/systemctl stop tomcat10
+
+        echo ">>> Backing up current deployment..."
+        if [ -d "$DEPLOY_DIR" ]; then
+          rm -rf $BACKUP_DIR
+          mv $DEPLOY_DIR $BACKUP_DIR
+        fi
+
+        echo ">>> Deploying new WAR..."
+        mkdir -p $DEPLOY_DIR
+        if ! unzip target/*.war -d $DEPLOY_DIR; then
+          echo "!!! Deployment failed. Restoring backup..."
+          rm -rf $DEPLOY_DIR
+          if [ -d "$BACKUP_DIR" ]; then
+            mv $BACKUP_DIR $DEPLOY_DIR
+          fi
+          sudo -n /bin/systemctl start tomcat10
+          exit 1
+        fi
+
+        echo ">>> Cleaning up..."
+        rm -f target/*.war
+
+        echo ">>> Starting Tomcat..."
+        sudo -n /bin/systemctl start tomcat10
+        echo ">>> Deployment completed successfully."
